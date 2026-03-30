@@ -336,6 +336,16 @@
   }
   .template-preview img { width: 100%; display: block; object-fit: contain; }
   .template-carousel { position: relative; }
+  .carousel-loading {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.35);
+    color: rgba(255,255,255,.92);
+    font-size: 12px; font-weight: 700;
+    letter-spacing: .2px;
+    z-index: 3;
+  }
+  .carousel-loading.hidden { display: none; }
   .carousel-nav {
     position: absolute; top: 50%; transform: translateY(-50%);
     width: 34px; height: 34px; border-radius: 18px;
@@ -343,6 +353,11 @@
     background: rgba(0,0,0,.35); color: #fff; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     z-index: 2; user-select: none;
+  }
+  .carousel-nav:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    pointer-events: none;
   }
   .carousel-nav:hover { background: rgba(0,0,0,.55); }
   #carousel-prev { left: 10px; }
@@ -546,6 +561,7 @@
           <button class="carousel-nav" id="carousel-prev" onclick="carouselPrev()" aria-label="Previous variation">‹</button>
           <img id="detail-img" src="" alt="Template Preview" style="cursor:zoom-in" onclick="openLightbox(this.src)">
           <button class="carousel-nav" id="carousel-next" onclick="carouselNext()" aria-label="Next variation">›</button>
+          <div class="carousel-loading hidden" id="carousel-loading">Loading...</div>
         </div>
         <div class="carousel-dots" id="carousel-dots"></div>
       </div>
@@ -988,6 +1004,7 @@ function carouselGoTo(i) {
   if (!carouselImages || !carouselImages.length) return;
   carouselIndex = (i + carouselImages.length) % carouselImages.length;
   const img = carouselImages[carouselIndex];
+  if (!img || !img.src) return;
   const detailImg = document.getElementById('detail-img');
   detailImg.src = img.src;
   detailImg.alt = img.alt || 'Template Preview';
@@ -1010,6 +1027,17 @@ function renderCarouselDots() {
       onclick="carouselGoTo(${idx})"
       aria-label="Variation ${idx + 1}"></button>
   `).join('');
+}
+
+function setCarouselLoading(isLoading) {
+  const loadingEl = document.getElementById('carousel-loading');
+  if (loadingEl) loadingEl.classList.toggle('hidden', !isLoading);
+  const prevBtn = document.getElementById('carousel-prev');
+  const nextBtn = document.getElementById('carousel-next');
+  if (prevBtn) prevBtn.disabled = !!isLoading;
+  if (nextBtn) nextBtn.disabled = !!isLoading;
+  const detailImg = document.getElementById('detail-img');
+  if (detailImg && isLoading) detailImg.src = '';
 }
 
 async function getMockThumbnailDataUrl(mockType) {
@@ -1131,27 +1159,40 @@ function showTemplate(catId, templateId) {
   const examplesRow = document.getElementById('d-examples');
   if (examplesRow) examplesRow.style.display = 'none';
 
-  // 1) Use example images immediately, so preview isn't blank.
+  // Optimization: do NOT load large example images on entry.
+  // First show a generated mock thumbnail, then let user navigate to variations.
   const exampleSrcs = (tmpl.exampleImages || []).map(imgUrl);
-  carouselImages = exampleSrcs.map((src, i) => ({ src, alt: `Variation ${i + 1}` }));
+  carouselImages = [];
   carouselIndex = 0;
   renderCarouselDots();
-  carouselGoTo(0);
+  setCarouselLoading(true);
 
-  // 2) Export mock frame as the first carousel slide (thumbnail).
+  // Export mock frame as the first carousel slide (thumbnail).
   const mySeq = ++mockExportSeq;
   (async () => {
     const mockThumb = await getMockThumbnailDataUrl(tmpl.mockType);
     if (mySeq !== mockExportSeq) return; // user switched template while exporting
-    if (!mockThumb) return;
 
-    // Put exported mock first, then keep example variations after it.
-    carouselImages = [{ src: mockThumb, alt: `${tmpl.name} · Mock Thumbnail` }].concat(carouselImages);
+    if (mockThumb) {
+      carouselImages = [{ src: mockThumb, alt: `${tmpl.name} · Mock Thumbnail` }].concat(
+        exampleSrcs.map((src, i) => ({ src, alt: `Variation ${i + 1}` }))
+      );
+      carouselIndex = 0;
+      renderCarouselDots();
+      setCarouselLoading(false);
+      carouselGoTo(0);
+      return;
+    }
+
+    // Fallback: if export fails, load variations directly.
+    carouselImages = exampleSrcs.map((src, i) => ({ src, alt: `Variation ${i + 1}` }));
     carouselIndex = 0;
     renderCarouselDots();
+    setCarouselLoading(false);
     carouselGoTo(0);
   })().catch(() => {
     // If export fails (e.g., html2canvas blocked), carousel will keep example images only.
+    setCarouselLoading(false);
   });
 
   showView('v3');
