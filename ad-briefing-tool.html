@@ -559,7 +559,7 @@
       <div class="template-preview">
         <div class="template-carousel">
           <button class="carousel-nav" id="carousel-prev" onclick="carouselPrev()" aria-label="Previous variation">‹</button>
-          <img id="detail-img" src="" alt="Template Preview" style="cursor:zoom-in" onclick="openLightbox(this.src)">
+          <img id="detail-img" src="" alt="Template Preview" style="cursor:zoom-in" onclick="openLightboxFromDetail()">
           <button class="carousel-nav" id="carousel-next" onclick="carouselNext()" aria-label="Next variation">›</button>
           <div class="carousel-loading hidden" id="carousel-loading">Loading...</div>
         </div>
@@ -591,20 +591,40 @@
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
 <script>
-function imgUrl(f) {
-  // Your image assets are stored in a subfolder: "example pictures/".
-  // Keep relative references in TEMPLATES (filenames only) while generating correct URLs.
-  const base = 'example%20pictures';
-  const parts = String(f || '').split('/').map(encodeURIComponent).join('/');
-  if (!parts) return '';
-  // If caller already passed a path (unlikely here), don't double-prefix.
-  if (f && String(f).includes('/')) return parts;
-  return `${base}/${parts}`;
+function imgUrl(f, variant='full') {
+  // TEMPLATES use filenames like "01 · iPhone Notes 01.jpg".
+  // For GitHub Pages:
+  // - original images live under "example pictures/" -> URL path includes "example%20pictures"
+  // - thumbnails are generated under "thumbs/" -> plain "thumbs"
+  const raw = String(f || '');
+  if (!raw) return '';
+
+  const base = variant === 'thumb' ? 'thumbs' : 'example%20pictures';
+  const parts = raw.split('/');
+  let last = parts[parts.length - 1];
+
+  if (variant === 'thumb') {
+    const lower = last.toLowerCase();
+    if (lower.endsWith('.jpg')) last = last.slice(0, -4) + '.webp';
+    else if (lower.endsWith('.jpeg')) last = last.slice(0, -5) + '.webp';
+    else if (lower.endsWith('.png')) last = last.slice(0, -4) + '.webp';
+  }
+
+  parts[parts.length - 1] = last;
+  const encoded = parts.map(encodeURIComponent).join('/');
+  return `${base}/${encoded}`;
 }
 
 function openLightbox(src) {
   document.getElementById('lightbox-img').src = src;
   document.getElementById('lightbox').classList.add('open');
+}
+
+function openLightboxFromDetail() {
+  const el = document.getElementById('detail-img');
+  if (!el) return;
+  const src = el.dataset?.fullSrc || el.src;
+  if (src) openLightbox(src);
 }
 function closeLightbox() {
   document.getElementById('lightbox').classList.remove('open');
@@ -1008,6 +1028,7 @@ function carouselGoTo(i) {
   const detailImg = document.getElementById('detail-img');
   detailImg.src = img.src;
   detailImg.alt = img.alt || 'Template Preview';
+  detailImg.dataset.fullSrc = img.fullSrc || img.src;
   const dots = document.getElementById('carousel-dots');
   if (dots) {
     dots.querySelectorAll('.carousel-dot').forEach((d, idx) => {
@@ -1160,8 +1181,12 @@ function showTemplate(catId, templateId) {
   if (examplesRow) examplesRow.style.display = 'none';
 
   // Optimization: do NOT load large example images on entry.
-  // First show a generated mock thumbnail, then let user navigate to variations.
-  const exampleSrcs = (tmpl.exampleImages || []).map(imgUrl);
+  // Use WebP thumbnails for the carousel; only full images open in lightbox.
+  const exampleEntries = (tmpl.exampleImages || []).map((filename, i) => ({
+    thumbSrc: imgUrl(filename, 'thumb'),
+    fullSrc: imgUrl(filename, 'full'),
+    alt: `Variation ${i + 1}`
+  }));
   carouselImages = [];
   carouselIndex = 0;
   renderCarouselDots();
@@ -1174,8 +1199,10 @@ function showTemplate(catId, templateId) {
     if (mySeq !== mockExportSeq) return; // user switched template while exporting
 
     if (mockThumb) {
-      carouselImages = [{ src: mockThumb, alt: `${tmpl.name} · Mock Thumbnail` }].concat(
-        exampleSrcs.map((src, i) => ({ src, alt: `Variation ${i + 1}` }))
+      carouselImages = [
+        { src: mockThumb, fullSrc: mockThumb, alt: `${tmpl.name} · Mock Thumbnail` }
+      ].concat(
+        exampleEntries.map(e => ({ src: e.thumbSrc, fullSrc: e.fullSrc, alt: e.alt }))
       );
       carouselIndex = 0;
       renderCarouselDots();
@@ -1185,7 +1212,7 @@ function showTemplate(catId, templateId) {
     }
 
     // Fallback: if export fails, load variations directly.
-    carouselImages = exampleSrcs.map((src, i) => ({ src, alt: `Variation ${i + 1}` }));
+    carouselImages = exampleEntries.map(e => ({ src: e.thumbSrc, fullSrc: e.fullSrc, alt: e.alt }));
     carouselIndex = 0;
     renderCarouselDots();
     setCarouselLoading(false);
